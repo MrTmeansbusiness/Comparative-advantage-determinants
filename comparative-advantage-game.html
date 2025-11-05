@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Comparative Advantage Game</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <style>
+    :root { --border:#e5e7eb; --muted:#6b7280; --fg:#111827; --bg:#ffffff; --primary:#2563eb; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 24px; color: var(--fg); background: var(--bg); }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    .top { display:flex; gap:12px; align-items:center; margin-bottom: 12px; }
+    .stack { display:grid; gap: 12px; max-width: 980px; }
+    .row { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .card { border:1px solid var(--border); border-radius:8px; padding:12px; background:#fff; }
+    .btn { padding: 8px 12px; border:1px solid var(--border); border-radius:8px; background:#fff; cursor:pointer; }
+    .btn:hover { background:#f9fafb; }
+    .btn-primary { border-color: var(--primary); background: var(--primary); color: #fff; }
+    .options { display:grid; gap:8px; }
+    .option { border:1px solid var(--border); border-radius:8px; padding:10px; cursor:pointer; }
+    .option:hover { background:#f9fafb; }
+    .option.correct { border-color:#10b981; background:#ecfdf5; }
+    .option.wrong { border-color:#ef4444; background:#fef2f2; }
+    #map { height: 320px; border:1px solid var(--border); border-radius:8px; }
+    .flag { height:18px; vertical-align:-3px; margin-left:6px; border:1px solid var(--border); }
+    .pill { border:1px solid var(--border); border-radius:999px; padding:3px 8px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h1 style="flex:1;">Comparative Advantage Game</h1>
+    <a class="btn" href="#" id="homeLink" style="display:none;">Home</a>
+    <button class="btn" id="restart">Restart</button>
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <div class="muted" id="player"></div>
+          <div class="muted">Round <span id="roundNum">0</span>/10 • Score: <span id="score">0</span></div>
+        </div>
+        <div class="row muted">
+          <span class="pill" id="countryName">—</span>
+          <img id="flag" class="flag" alt="flag"/>
+        </div>
+      </div>
+      <div id="map" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card" id="stageExport">
+      <div style="font-weight:600; margin-bottom:8px;">1) Choose the main export</div>
+      <div class="options" id="exportOptions"></div>
+      <div class="muted" id="exportFeedback"></div>
+    </div>
+
+    <div class="card" id="stageDet" style="display:none;">
+      <div style="font-weight:600; margin-bottom:8px;">2) Choose the most likely determinant of comparative advantage</div>
+      <div class="options" id="detOptions"></div>
+      <div class="muted" id="detFeedback"></div>
+    </div>
+
+    <div class="row" id="nav" style="justify-content:space-between;">
+      <button class="btn" id="skip">Skip country</button>
+      <button class="btn btn-primary" id="next" disabled>Next</button>
+    </div>
+
+    <div class="card" id="summary" style="display:none;"></div>
+    <div class="muted" style="margin-top:6px;">
+      Data source: <a href="https://oec.world/" target="_blank" rel="noopener">OEC</a> (2022 profiles)
+    </div>
+  </div>
+
+  <script>
+    // Minimal built-in dataset (extendable). Exports and determinants chosen for pedagogy.
+    // determinant options used: Natural resources, Climate/geography, Skilled labor/human capital, Technology/innovation,
+    // Economies of scale, Infrastructure/logistics, Institutional/regulatory environment
+    const COUNTRIES = [
+      { name:'Saudi Arabia', iso2:'sa', lat:24.0, lng:45.0, export:'Crude oil', determinant:'Natural resource endowments' },
+      { name:'Brazil', iso2:'br', lat:-10.0, lng:-55.0, export:'Iron ore', determinant:'Natural resource endowments' },
+      { name:'Vietnam', iso2:'vn', lat:16.0, lng:108.0, export:'Textiles and apparel', determinant:'Workforce skills and education' },
+      { name:'Germany', iso2:'de', lat:51.0, lng:10.0, export:'Automobiles', determinant:'Industrial experience' },
+      { name:'Chile', iso2:'cl', lat:-30.0, lng:-71.0, export:'Copper', determinant:'Natural resource endowments' },
+      { name:'Bangladesh', iso2:'bd', lat:24.0, lng:90.0, export:'Garments', determinant:'Workforce skills and education' },
+      { name:'Australia', iso2:'au', lat:-25.0, lng:133.0, export:'Iron ore', determinant:'Natural resource endowments' },
+      { name:'New Zealand', iso2:'nz', lat:-41.0, lng:174.0, export:'Dairy products', determinant:'Geographic location' },
+      { name:'Norway', iso2:'no', lat:61.0, lng:8.0, export:'Petroleum and gas', determinant:'Natural resource endowments' },
+      { name:'India', iso2:'in', lat:21.0, lng:78.0, export:'Refined petroleum', determinant:'Industrial experience' },
+      { name:'Japan', iso2:'jp', lat:36.0, lng:138.0, export:'Electronics', determinant:'Innovation and research capacity' },
+      { name:'Ethiopia', iso2:'et', lat:9.1, lng:40.5, export:'Coffee', determinant:'Geographic location' },
+      { name:'Ghana', iso2:'gh', lat:7.9, lng:-1.0, export:'Gold', determinant:'Natural resource endowments' },
+      { name:'Canada', iso2:'ca', lat:56.0, lng:-106.0, export:'Crude oil', determinant:'Natural resource endowments' },
+      { name:'South Korea', iso2:'kr', lat:36.5, lng:127.9, export:'Integrated circuits', determinant:'Innovation and research capacity' },
+      { name:'Kenya', iso2:'ke', lat:0.0, lng:38.0, export:'Tea', determinant:'Geographic location' },
+      { name:'Thailand', iso2:'th', lat:15.9, lng:100.0, export:'Computers', determinant:'Infrastructure' },
+      { name:'Indonesia', iso2:'id', lat:-2.5, lng:118.0, export:'Coal briquettes', determinant:'Natural resource endowments' },
+      { name:'Nigeria', iso2:'ng', lat:9.1, lng:8.7, export:'Crude oil', determinant:'Natural resource endowments' },
+      { name:'Netherlands', iso2:'nl', lat:52.1, lng:5.3, export:'Refined petroleum', determinant:'Historical influences' },
+      { name:'United States', iso2:'us', lat:39.8, lng:-98.6, export:'Refined petroleum', determinant:'Industrial experience' },
+      { name:'China', iso2:'cn', lat:35.9, lng:104.1, export:'Broadcasting equipment', determinant:'Industrial experience' },
+      { name:'Switzerland', iso2:'ch', lat:46.8, lng:8.2, export:'Gold', determinant:'Political factors' },
+      { name:'Qatar', iso2:'qa', lat:25.3, lng:51.2, export:'Natural gas', determinant:'Natural resource endowments' },
+    ];
+
+    const DETERMINANTS = [
+      'Geographic location',
+      'Natural resource endowments',
+      'Political factors',
+      'Historical influences',
+      'Workforce skills and education',
+      'Entrepreneurship and management expertise',
+      'Infrastructure',
+      'Innovation and research capacity',
+      'Industrial experience',
+    ];
+
+    const STORAGE_KEY = 'ca_game_results';
+    const HISTORY_KEY = 'ca_game_recent'; // { [student]: [countryNames] }
+
+    function qs(k){ const p = new URLSearchParams(location.search); return p.get(k); }
+    function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+    function pick(arr, n){ return shuffle(arr.slice()).slice(0,n); }
+
+    function getStudent(){ return qs('student') || 'anonymous'; }
+    function loadHistory(){ try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '{}'); } catch { return {}; } }
+    function saveHistory(obj){ localStorage.setItem(HISTORY_KEY, JSON.stringify(obj)); }
+    function setRecentForStudent(student, names){ const h=loadHistory(); h[student]=names; saveHistory(h); }
+    function getRecentForStudent(student){ const h=loadHistory(); return Array.isArray(h[student]) ? h[student] : []; }
+
+    // Build export option from other countries
+    function exportDistractors(correct){
+      const pool = Array.from(new Set(COUNTRIES.map(c => c.export).filter(x => x !== correct)));
+      return pick(pool, 2);
+    }
+    function determinantDistractors(correct){
+      const pool = DETERMINANTS.filter(d => d !== correct);
+      return pick(pool, 2);
+    }
+
+    let map, marker;
+    function initMap(){
+      map = L.map('map', { zoomControl:false, attributionControl:false });
+      const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 5, minZoom: 2 });
+      tiles.addTo(map);
+    }
+    function showCountryOnMap(c){
+      const {lat, lng, name} = c;
+      map.setView([lat,lng], 3);
+      if (marker) marker.remove();
+      marker = L.circleMarker([lat,lng], { radius: 8, color:'#2563eb', weight:2, fillColor:'#93c5fd', fillOpacity:0.9 }).addTo(map).bindTooltip(name, {permanent:false});
+    }
+
+    // Game state
+    let order = [];
+    let round = 0; // 0..9
+    let score = 0;
+    let answeredExport = false;
+    let current = null;
+
+    function updateHeader(){
+      document.getElementById('roundNum').textContent = Math.min(round+1,10);
+      document.getElementById('score').textContent = score;
+      const student = qs('student');
+      document.getElementById('player').textContent = student ? `Player: ${student}` : '';
+    }
+
+    function setCountryUI(c){
+      document.getElementById('countryName').textContent = c.name;
+      const flag = document.getElementById('flag');
+      flag.src = `https://flagcdn.com/w80/${c.iso2}.png`;
+      flag.alt = `${c.name} flag`;
+      showCountryOnMap(c);
+    }
+
+    function renderExportStage(){
+      const wrap = document.getElementById('exportOptions');
+      wrap.innerHTML = '';
+      const options = shuffle([ current.export, ...exportDistractors(current.export) ]);
+      options.forEach(opt => {
+        const div = document.createElement('div'); div.className='option'; div.textContent = opt;
+        div.addEventListener('click', () => {
+          if (answeredExport) return;
+          answeredExport = true;
+          const correct = (opt === current.export);
+          if (correct) { score += 1; div.classList.add('correct'); }
+          else { div.classList.add('wrong'); [...wrap.children].forEach(ch => { if (ch.textContent===current.export) ch.classList.add('correct'); }); }
+          document.getElementById('exportFeedback').textContent = correct ? 'Correct. Now choose the determinant.' : `Correct export: ${current.export}. Now choose the determinant.`;
+          // enable determinant stage
+          document.getElementById('stageDet').style.display = '';
+          renderDeterminantStage();
+        });
+        wrap.appendChild(div);
+      });
+    }
+
+    function renderDeterminantStage(){
+      const wrap = document.getElementById('detOptions');
+      wrap.innerHTML = '';
+      const options = shuffle([ current.determinant, ...determinantDistractors(current.determinant) ]);
+      options.forEach(opt => {
+        const div = document.createElement('div'); div.className='option'; div.textContent = opt;
+        div.addEventListener('click', () => {
+          // prevent multiple awarding
+          if (document.getElementById('next').disabled === false) return;
+          const correct = (opt === current.determinant);
+          if (correct) { score += 1; div.classList.add('correct'); }
+          else { div.classList.add('wrong'); [...wrap.children].forEach(ch => { if (ch.textContent===current.determinant) ch.classList.add('correct'); }); }
+          document.getElementById('detFeedback').textContent = correct ? 'Correct!' : `Most likely determinant: ${current.determinant}`;
+          document.getElementById('next').disabled = false;
+          updateHeader();
+        });
+        wrap.appendChild(div);
+      });
+    }
+
+    function saveResult(){
+      try {
+        const student = qs('student') || 'anonymous';
+        const entry = { when: Date.now(), student, score, total: 20 };
+        const prev = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        prev.push(entry);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(prev));
+      } catch {}
+    }
+
+    function showSummary(){
+      const box = document.getElementById('summary');
+      box.style.display = '';
+      box.innerHTML = `\n        <div style="font-weight:600; margin-bottom:6px;">Game complete</div>\n        <div class="muted">You answered ${score} out of 20 correctly.</div>\n        <div class="row" style="margin-top:8px;">\n          <button class="btn" onclick="location.reload()">Play again</button>\n        </div>\n      `;
+    }
+
+    function nextRound(){
+      if (round >= 10){
+        saveResult();
+        showSummary();
+        return;
+      }
+      current = order[round];
+      setCountryUI(current);
+      answeredExport = false;
+      document.getElementById('stageDet').style.display = 'none';
+      document.getElementById('exportFeedback').textContent = '';
+      document.getElementById('detFeedback').textContent = '';
+      document.getElementById('next').disabled = true;
+      renderExportStage();
+      updateHeader();
+      round++;
+    }
+
+    function start(){
+      const student = getStudent();
+      const recent = new Set(getRecentForStudent(student));
+      // Prefer countries not in recent
+      const notRecent = COUNTRIES.filter(c => !recent.has(c.name));
+      const recentOnes = COUNTRIES.filter(c => recent.has(c.name));
+      const chosen = [];
+      chosen.push(...pick(notRecent, Math.min(10, notRecent.length)));
+      if (chosen.length < 10) {
+        const needed = 10 - chosen.length;
+        // Fill from recent list if unavoidable
+        const fill = pick(recentOnes.filter(c => !chosen.some(x=>x.name===c.name)), Math.min(needed, recentOnes.length));
+        chosen.push(...fill);
+      }
+      // Ensure uniqueness and exact length
+      const unique = [];
+      const seen = new Set();
+      for (const c of chosen){ if (!seen.has(c.name)) { unique.push(c); seen.add(c.name); } if (unique.length===10) break; }
+      order = unique;
+      // Save these as recent for next play
+      setRecentForStudent(student, order.map(c => c.name));
+      round = 0; score = 0; answeredExport = false;
+      updateHeader();
+      nextRound();
+    }
+
+    // Init
+    initMap();
+    start();
+
+    document.getElementById('next').addEventListener('click', nextRound);
+    document.getElementById('skip').addEventListener('click', nextRound);
+    document.getElementById('restart').addEventListener('click', () => location.reload());
+  </script>
+</body>
+</html>
